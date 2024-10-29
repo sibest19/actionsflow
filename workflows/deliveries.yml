@@ -1,0 +1,102 @@
+on:
+  email:
+    imap:
+      host: imap.gmail.com
+      user: ${{secrets.GMAIL_USER}}
+      password: ${{secrets.GMAIL_PASSWORD}}
+      port: 993
+      tls: true
+      authTimeout: 3000
+
+# email outputs example:
+# {
+#    "text": "Test body.",
+#    "textAsHtml": "<p>Test body.</p>",
+#    "subject": "Test Subject",
+#    "date": "2020-09-14T23:44:20.000Z",
+#    "to": {
+#      "value": [
+#        {
+#          "address": "theowenyoung@outlook.com",
+#          "name": ""
+#        }
+#      ],
+#      "html": "<span class=\"mp_address_group\"><a href=\"mailto:theowenyoung@outlook.com\" class=\"mp_address_email\">theowenyoung@outlook.com</a></span>",
+#      "text": "theowenyoung@outlook.com"
+#    },
+#    "from": {
+#      "value": [
+#        {
+#          "address": "theowenyoung@gmail.com",
+#          "name": "Owen Young"
+#        }
+#      ],
+#      "html": "<span class=\"mp_address_group\"><span class=\"mp_address_name\">Owen Young</span> &lt;<a href=\"mailto:theowenyoung@gmail.com\" class=\"mp_address_email\">theowenyoung@gmail.com</a>&gt;</span>",
+#      "text": "Owen Young <theowenyoung@gmail.com>"
+#    },
+#    "cc": {
+#      "value": [
+#        {
+#          "address": "owen@owenyoung.com",
+#          "name": ""
+#        },
+#        {
+#          "address": "test@owenyoung.com",
+#          "name": ""
+#        }
+#      ],
+#      "html": "<span class=\"mp_address_group\"><a href=\"mailto:owen@owenyoung.com\" class=\"mp_address_email\">owen@owenyoung.com</a></span>, <span class=\"mp_address_group\"><a href=\"mailto:test@owenyoung.com\" class=\"mp_address_email\">test@owenyoung.com</a></span>",
+#      "text": "owen@owenyoung.com, test@owenyoung.com"
+#    },
+#    "messageId": "<098F27FF-0F94-406E-A8B1-933D5B21CB43@gmail.com>",
+#    "html": false
+#  }
+
+
+jobs:
+  store-amazon-order:
+    if: ${{'conferma-ordine@amazon.it' == on.email.outputs.from.value[0].address}}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Extract email data'
+        uses: actionsflow/axios@v1
+        id: data
+        with:
+          url: https://api.openai.com/v1/chat/completions
+          method: 'POST'
+          content-type: application/json
+          data: '{"model":"gpt-4o-mini","messages":[{"role":"system","content":"You extract Amazon order info from emails."},{"role":"user","content":"<<<${{on.email.outputs.text}}>>>"}],"response_format":{"type":"json_schema","json_schema":{"name":"amazon_order_info","schema":{"type":"object","properties":{"orderNumber":{"description":"The amazon order number from the email","type":"string"},"estimatedDeliveryDate":{"description":"The estimated delivery date of the order","type":"string"}},"additionalProperties":false}}}}'
+          bearer-token: ${{ secrets.OPENAI_API_KEY }}
+          debug: true
+      - name: 'Request token'
+        uses: actionsflow/axios@v1
+        id: token
+        with:
+          url: https://delivery-box-project.andreanisimone.workers.dev/auth/token
+          method: 'POST'
+          accept: 200
+          content-type: application/x-www-form-urlencoded
+          data: '{"client_id":"<<<${{secrets.DELIVERY_PROJECT_CLIENT_ID}}>>>","client_secret":"<<<${{secrets.DELIVERY_PROJECT_CLIENT_SECRET}}>>>","grant_type":"client_credentials","scope":"..."}'
+          timeout: 10000
+          debug: true
+      - name: 'Store order'
+        uses: actionsflow/axios@v1
+        with:
+          url: https://delivery-box-project.andreanisimone.workers.dev/api/v1/orders
+          method: 'POST'
+          accept: 201
+          content-type: application/json
+          data: '{ "order_number": "<<<${{steps.data.outputs.choices.message.content}}>>>",  "order_source": "amazon_it" }'
+          timeout: 10000
+          bearer-token: ${{ steps.token.outputs.access_token }}
+          debug: true
+
+  print:
+    name: Print
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print Outputs
+        env:
+          subject: ${{(on.email.outputs.text)}}
+        run: |
+          echo text: $text
